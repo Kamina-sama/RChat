@@ -19,17 +19,24 @@ fn main() {
             });
     });
     loop {
+        let _ = c.listen_loop();
         if let Ok(r) = rx.try_recv() {
             print!("Typed: {}", r);
             if c.is_connected() {
                 println!("Trying to send...");
-                let _ = c.send(&r).map_err(|e| {
+                let _ = c.send(&r).map(|o| {
+                    println!("Sent message");
+                    o
+                }).map_err(|e| {
                     eprintln!("Failure to send: {}", e);
                     e
                 });
             } else {
                 println!("Trying to connect to {}", r);
-                let _ = c.connect(&r).map_err(|e| {
+                let _ = c.connect(r.trim()).map(|o| {
+                    println!("Connected");
+                    o
+                }).map_err(|e| {
                     eprintln!("Failure to connect: {}", e);
                     e
                 });

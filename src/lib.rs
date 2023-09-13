@@ -42,7 +42,7 @@ impl Connection {
                                     }
                                 }
 
-                                Err(e) => println!("Error on TcpStream read: {}", e.to_string()),
+                                Err(e) => (),
                             }
                         }
                         thread::sleep(Duration::from_millis(50));
@@ -71,7 +71,7 @@ impl Connection {
         self.writer.is_some()
     }
     pub fn listen_loop(&mut self) -> Result<(), std::io::Error> {
-        if let Ok(r) = self.received_messages.read() {
+        if let Ok(r) = self.received_messages.try_read() {
             r.lines().skip(self.received_messages_size).for_each(|x| {
                 self.received_messages_size += 1;
                 if let Some(on_receive) = self.on_receive.as_mut() {
