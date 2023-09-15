@@ -214,6 +214,7 @@ impl ChatClient {
     fn add_receiver(&mut self, ip: &str) -> Result<(), Box<dyn Error>> {
         let socket = SocketAddrV4::new(Ipv4Addr::from_str(ip.trim())?, PORT);
         self.receivers.insert(socket.clone());
+        self.unicast_message(Message::Connected(get_self_socket()), socket)?;
         self.unicast_message(Message::GetReceivers(get_self_socket()), socket)?;
         Ok(())
     }
