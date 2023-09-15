@@ -65,12 +65,12 @@ impl Chat2 {
                         self.client.receivers.remove(&socket);
                     }
                     Message::GetReceivers(socket) => {
-                        self.client.broadcast_message(Message::PostReceivers(
-                            self.client.receivers.clone(),
-                        ));
+                        self.client.unicast_message(Message::PostReceivers(
+                            self.client.receivers.clone()
+                        ), socket);
                     }
                     Message::PostReceivers(r) => {
-                        self.client.receivers.extend(r.iter());
+                        self.client.receivers.extend(r.iter().filter(|&s| *s!=get_self_socket()));
                         self.client.broadcast_message(Message::Connected(get_self_socket()));
                     }
                     _ => {
