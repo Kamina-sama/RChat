@@ -7,11 +7,19 @@ use std::{
     net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream},
     str::FromStr,
     sync::mpsc::{self, Receiver, Sender},
-    thread::{self, JoinHandle},
+    thread,
     time::{SystemTime, UNIX_EPOCH},
 };
 
 const PORT: u16 = 1024;
+
+fn get_self_socket() -> SocketAddrV4 {
+    let ip = local_ip_address::local_ip().unwrap();
+    match ip {
+        std::net::IpAddr::V4(i) => SocketAddrV4::new(i, PORT),
+        std::net::IpAddr::V6(_) => panic!("fuck you"),
+    }
+}
 
 pub struct Chat2 {
     messages: Vec<Message>,
@@ -53,9 +61,10 @@ impl Chat2 {
                     Message::Disconnect(socket) => {
                         self.client.receivers.remove(&socket);
                     }
-                    Message::GetReceivers => {
-                        self.client
-                            .send_message(Message::PostReceivers(self.client.receivers.clone()));
+                    Message::GetReceivers(socket) => {
+                        self.client.broadcast_message(Message::PostReceivers(
+                            self.client.receivers.clone(),
+                        ));
                     }
                     Message::PostReceivers(r) => {
                         self.client.receivers.extend(r.iter());
@@ -78,13 +87,8 @@ impl Chat2 {
                         });
                     println!("List of receivers is now {:?}", self.client.receivers);
                 } else if i.starts_with("!disconnect") {
-                    let ip = local_ip_address::local_ip().unwrap();
-                    let ip = match ip {
-                        std::net::IpAddr::V4(i) => i,
-                        std::net::IpAddr::V6(_) => panic!("fuck you"),
-                    };
                     self.client
-                        .send_message(Message::Disconnect(SocketAddrV4::new(ip, PORT)));
+                        .broadcast_message(Message::Disconnect(get_self_socket()));
                     self.client.clear_receivers();
                     println!("List of receivers is now {:?}", self.client.receivers);
                 } else if i.starts_with("!setname") {
@@ -94,7 +98,7 @@ impl Chat2 {
                     });
                     println!("Name is now {}", self.client.user_name);
                 } else {
-                    self.client.send_normal_message(i).unwrap_or_else(|e| {
+                    self.client.broadcast_normal_message(i).unwrap_or_else(|e| {
                         eprintln!("Could not send: {}", e);
                     });
                 }
@@ -133,7 +137,7 @@ enum Message {
         content: String,
         time_stamp: u64,
     },
-    GetReceivers,
+    GetReceivers(SocketAddrV4),
     PostReceivers(HashSet<SocketAddrV4>),
     Disconnect(SocketAddrV4),
 }
@@ -158,11 +162,19 @@ impl ChatClient {
             receivers: HashSet::new(),
         }
     }
-    fn send_message(&self, message: Message) -> Result<(), Box<dyn Error>> {
-        self.send_raw(ron::to_string(&message)?)?;
+    fn unicast_message(
+        &self,
+        message: Message,
+        socket: SocketAddrV4,
+    ) -> Result<(), Box<dyn Error>> {
+        self.unicast_raw(ron::to_string(&message)?, socket)?;
         Ok(())
     }
-    fn send_normal_message(&self, message: String) -> Result<(), Box<dyn Error>> {
+    fn broadcast_message(&self, message: Message) -> Result<(), Box<dyn Error>> {
+        self.broadcast_raw(ron::to_string(&message)?)?;
+        Ok(())
+    }
+    fn broadcast_normal_message(&self, message: String) -> Result<(), Box<dyn Error>> {
         let now = SystemTime::now();
         let time_stamp = now.duration_since(UNIX_EPOCH).unwrap().as_secs();
         let message = Message::Normal {
@@ -170,12 +182,21 @@ impl ChatClient {
             content: message,
             author: self.user_name.clone(),
         };
-        self.send_raw(ron::to_string(&message)?)?;
+        self.broadcast_raw(ron::to_string(&message)?)?;
         Ok(())
     }
-    fn send_raw(&self, message: String) -> Result<(), Box<dyn Error>> {
+    fn broadcast_raw(&self, message: String) -> Result<(), Box<dyn Error>> {
         for receiver in &self.receivers {
             let mut stream = TcpStream::connect(receiver)?;
+            stream.write_all(message.as_bytes())?;
+            stream.flush()?;
+            stream.shutdown(std::net::Shutdown::Write)?;
+        }
+        Ok(())
+    }
+    fn unicast_raw(&self, message: String, socket: SocketAddrV4) -> Result<(), Box<dyn Error>> {
+        if let Some(s) = self.receivers.get(&socket) {
+            let mut stream = TcpStream::connect(s)?;
             stream.write_all(message.as_bytes())?;
             stream.flush()?;
             stream.shutdown(std::net::Shutdown::Write)?;
@@ -186,9 +207,9 @@ impl ChatClient {
         self.user_name = String::from(user_name.trim());
     }
     fn add_receiver(&mut self, ip: &str) -> Result<(), Box<dyn Error>> {
-        self.receivers
-            .insert(SocketAddrV4::new(Ipv4Addr::from_str(ip.trim())?, PORT));
-        self.send_message(Message::GetReceivers)?;
+        let socket = SocketAddrV4::new(Ipv4Addr::from_str(ip.trim())?, PORT);
+        self.receivers.insert(socket.clone());
+        self.unicast_message(Message::GetReceivers(get_self_socket()), socket)?;
         Ok(())
     }
     fn clear_receivers(&mut self) {
