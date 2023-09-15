@@ -58,6 +58,9 @@ impl Chat2 {
             self.client_rx.try_iter().for_each(|m| {
                 let m: Message = ron::from_str(&m).unwrap();
                 match m {
+                    Message::Connected(socket) => {
+                        self.client.receivers.insert(socket);
+                    }
                     Message::Disconnect(socket) => {
                         self.client.receivers.remove(&socket);
                     }
@@ -68,6 +71,7 @@ impl Chat2 {
                     }
                     Message::PostReceivers(r) => {
                         self.client.receivers.extend(r.iter());
+                        self.client.broadcast_message(Message::Connected(get_self_socket()));
                     }
                     _ => {
                         self.messages.push(m);
@@ -137,6 +141,7 @@ enum Message {
         content: String,
         time_stamp: u64,
     },
+    Connected(SocketAddrV4),
     GetReceivers(SocketAddrV4),
     PostReceivers(HashSet<SocketAddrV4>),
     Disconnect(SocketAddrV4),
